@@ -4,7 +4,7 @@ version := "0.1"
 
 scalaVersion := "2.13.1"
 
-libraryDependencies += "dev.zio" %% "zio" % "1.0.0-RC17"
+libraryDependencies += "dev.zio" %% "zio" % "1.0.0-RC18"
 libraryDependencies += "com.softwaremill.sttp.client" %% "async-http-client-backend-zio" % "2.0.1"
 libraryDependencies += "com.softwaremill.sttp.client" %% "circe" % "2.0.1"
 libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.2.3"

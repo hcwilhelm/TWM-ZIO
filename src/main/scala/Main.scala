@@ -1,9 +1,10 @@
-import config.ConfigurationModule
 import domain.Domain._
-import persistence.ForecastPersistence
-import weather.WeatherModule
+import persistence.Persistence
+import weather.Weather
 import zio._
 import zio.console._
+
+import scala.math.Ordering.Double
 
 object Main extends App {
 
@@ -18,41 +19,41 @@ object Main extends App {
     case _ => ZIO.fail(UnknownCity(cityName))
   }
 
-  def fetchForecast(city: City): ZIO[ForecastPersistence with WeatherModule, Throwable, Forecast] = for {
-    maybeForecast <- ForecastPersistence.factory.findByCity(city)
-    forecast      <- maybeForecast.fold(WeatherModule.factory.forecast(city))(ZIO.effectTotal(_))
-    _             <- ForecastPersistence.factory.insert(Request(city, forecast))
+  def fetchForecast(city: City): ZIO[Persistence[City, Forecast] with Weather, Throwable, Forecast] = for {
+    maybeForecast <- persistence.get[Persistence[City, Forecast], City, Forecast](city)
+    forecast      <- maybeForecast.fold(weather.forecast(city))(ZIO.effectTotal(_))
+    _             <- persistence.set[Persistence[City, Forecast], City, Forecast](city, forecast)
   } yield forecast
 
   val askCity: ZIO[Console, Throwable, City] = for {
-    _ <- console.putStrLn("What is the next city ?")
-    cityName <- console.getStrLn
-    city <- cityByName(cityName)
+    _         <- console.putStrLn(line = "What is the next city ?")
+    cityName  <- console.getStrLn
+    city      <- cityByName(cityName)
   } yield city
 
-  val askFetchJudge: ZIO[Console with ForecastPersistence with WeatherModule, Throwable, Unit] = for {
-    city      <- askCity
-    forecast  <- fetchForecast(city)
-    _         <- console.putStrLn(s"Forecast for $city is ${forecast.temperature}")
-    hottest   <- ForecastPersistence.factory.findHottest
-    _         <- console.putStrLn(s"Hottest city found so far is ${hottest.city.name} ${hottest.forecast.temperature.value} ${hottest.forecast.temperature.unit}")
+  implicit val ordering: Double.TotalOrdering.type = Ordering.Double.TotalOrdering
+
+  val askFetchJudge: ZIO[Console with Persistence[City, Forecast] with Weather, Throwable, Unit] = for {
+    city                <- askCity
+    forecast            <- fetchForecast(city)
+    _                   <- console.putStrLn(line = s"Forecast for $city is ${forecast.temperature}")
+    (hCity, hForecast)  <- persistence.maxBy[Persistence[City, Forecast], City, Forecast, Double](_._2.temperature.value)
+    _                   <- console.putStrLn(line = s"Hottest city found so far is ${hCity.name} ${hForecast.temperature.value} ${hForecast.temperature.unit}")
   } yield ()
 
-  val logic: ZIO[Console with ForecastPersistence with WeatherModule with ConfigurationModule, Throwable, Unit] = for {
-    config  <- ConfigurationModule.factory.getConfig
+  val logic: ZIO[Console with Persistence[City, Forecast] with Weather with configuration.Configuration, Throwable, Unit] = for {
+    config  <- configuration.getConfig
     _       <- console.putStrLn(s"Host : ${config.host} | Port : ${config.port}")
     _       <- askFetchJudge.forever
   } yield ()
 
+  type PEnv = Persistence[City, Forecast] with Weather with configuration.Configuration
+
+  object PEnv {
+    val live = Persistence.inMemory[City, Forecast] ++ configuration.Configuration.live >>> Weather.test
+  }
+
   val program: ZIO[Console, Throwable, Unit] = for {
-    requestMap <- Ref.make[Map[City, Forecast]](Map.empty)
-    logic      <- logic.provideSome[Console]{c =>
-      new Console with WeatherModule.Live with ConfigurationModule.Live with ForecastPersistence.InMemory {
-        println(configurationModule)
-        override val console: Console.Service[Any] = c.console
-        override val requestsMapRef: Ref[Map[City, Forecast]] = requestMap
-        override val configuration: ConfigurationModule.Service[Any] = configurationModule
-      }
-    }
+    logic      <- logic.provideSomeLayer[Console](PEnv.live)
   } yield logic
 }
