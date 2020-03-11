@@ -1,10 +1,10 @@
+import configuration.AppConfig
 import domain.Domain._
-import persistence.Persistence
-import weather.Weather
+import persistence.{ForecastPersistence, KeyValuePersistence}
+import weather.OpenWeatherClient
+import zio.ZLayer.NoDeps
 import zio._
 import zio.console._
-
-import scala.math.Ordering.Double
 
 object Main extends App {
 
@@ -19,10 +19,10 @@ object Main extends App {
     case _ => ZIO.fail(UnknownCity(cityName))
   }
 
-  def fetchForecast(city: City): ZIO[Persistence[City, Forecast] with Weather, Throwable, Forecast] = for {
-    maybeForecast <- persistence.get[Persistence[City, Forecast], City, Forecast](city)
-    forecast      <- maybeForecast.fold(weather.forecast(city))(ZIO.effectTotal(_))
-    _             <- persistence.set[Persistence[City, Forecast], City, Forecast](city, forecast)
+  def fetchForecast(city: City): ZIO[ForecastPersistence with OpenWeatherClient, Throwable, Forecast] = for {
+    maybeForecast <- ForecastPersistence.get(city)
+    forecast      <- maybeForecast.fold(OpenWeatherClient.forecast(city))(ZIO.effectTotal(_))
+    _             <- ForecastPersistence.set(city, forecast)
   } yield forecast
 
   val askCity: ZIO[Console, Throwable, City] = for {
@@ -31,31 +31,23 @@ object Main extends App {
     city      <- cityByName(cityName)
   } yield city
 
-  implicit val ordering: Double.TotalOrdering.type = Ordering.Double.TotalOrdering
-
-  val askFetchJudge: ZIO[Console with Persistence[City, Forecast] with Weather, Throwable, Unit] = for {
+  val askFetchJudge: ZIO[Console with ForecastPersistence with OpenWeatherClient, Throwable, Unit] = for {
     city                <- askCity
     forecast            <- fetchForecast(city)
     _                   <- console.putStrLn(line = s"Forecast for $city is ${forecast.temperature}")
-    (hCity, hForecast)  <- persistence.maxBy[Persistence[City, Forecast], City, Forecast, Double](_._2.temperature.value)
+    (hCity, hForecast)  <- ForecastPersistence.hottest
     _                   <- console.putStrLn(line = s"Hottest city found so far is ${hCity.name} ${hForecast.temperature.value} ${hForecast.temperature.unit}")
   } yield ()
 
-  val logic: ZIO[Console with Persistence[City, Forecast] with Weather with configuration.Configuration, Throwable, Unit] = for {
-    config  <- configuration.getConfig
+  val logic: ZIO[Console with ForecastPersistence with OpenWeatherClient with AppConfig, Throwable, Unit] = for {
+    config  <- AppConfig.getConfig
     _       <- console.putStrLn(s"Host : ${config.host} | Port : ${config.port}")
     _       <- askFetchJudge.forever
   } yield ()
 
+  val appConfigLayer: NoDeps[Nothing, AppConfig] = AppConfig.live
+  val forecastPersistenceLayer: NoDeps[Nothing, ForecastPersistence] = KeyValuePersistence.inMemory[City, Forecast] >>> ForecastPersistence.live
+  val openWeatherClientLayer: NoDeps[Nothing, OpenWeatherClient] = Console.live ++ appConfigLayer >>> OpenWeatherClient.live
 
-  object PEnv {
-    val l: ZLayer[Any, Nothing, Persistence[City, Forecast] with configuration.Configuration] =  Persistence.inMemory[City, Forecast] ++ configuration.Configuration.live
-    val w: ZLayer[Any, Nothing, Weather] = configuration.Configuration.live >>> Weather.test
-  }
-
-
-
-  val program: ZIO[Console, Throwable, Unit] = for {
-    logic      <- logic.provideSomeLayer[Console](PEnv.l ++ PEnv.w)
-  } yield logic
+  val program: ZIO[Console, Throwable, Unit] = logic.provideSomeLayer[Console](appConfigLayer ++ forecastPersistenceLayer ++ openWeatherClientLayer)
 }
