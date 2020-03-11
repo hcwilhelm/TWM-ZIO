@@ -12,7 +12,7 @@ object Domain {
   final case class Forecast(temperature: Temperature)
   final case class Request(city: City, forecast: Forecast)
 
-  sealed trait Error extends Exception with Serializable with Product
+  sealed trait Error extends Throwable
   final case class UnknownCity(city: String) extends Error
   final case object RequestMapEmpty extends Error
   final case class HttpError(code: String, message: String) extends Error

@@ -27,6 +27,7 @@ object ForecastPersistence {
 
   val live: ZLayer[KeyValuePersistence[City, Forecast], Nothing, ForecastPersistence] = ZLayer fromService Live
 
+
   final def get(city: City): URIO[ForecastPersistence, Option[Forecast]] = ZIO.accessM(_.get.get(city))
 
   final def set(city: City, forecast: Forecast): URIO[ForecastPersistence, Unit] = ZIO.accessM(_.get.set(city, forecast))

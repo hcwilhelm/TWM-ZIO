@@ -12,10 +12,10 @@ object Main extends App {
     program.tapError(e => console.putStrLn(e.toString)).fold(_ => 1, _ => 0)
 
   def cityByName(cityName: String): ZIO[Any, Error, City] = cityName match {
-    case "Berlin" => ZIO.effectTotal(City(cityName))
-    case "Hamburg" => ZIO.effectTotal(City(cityName))
-    case "Paris" => ZIO.effectTotal(City(cityName))
-    case "Cadiz" => ZIO.effectTotal(City(cityName))
+    case "Berlin" => ZIO.succeed(City(cityName))
+    case "Hamburg" => ZIO.succeed(City(cityName))
+    case "Paris" => ZIO.succeed(City(cityName))
+    case "Cadiz" => ZIO.succeed(City(cityName))
     case _ => ZIO.fail(UnknownCity(cityName))
   }
 
@@ -39,15 +39,14 @@ object Main extends App {
     _                   <- console.putStrLn(line = s"Hottest city found so far is ${hCity.name} ${hForecast.temperature.value} ${hForecast.temperature.unit}")
   } yield ()
 
-  val logic: ZIO[Console with ForecastPersistence with OpenWeatherClient with AppConfig, Throwable, Unit] = for {
+  val logic: ZIO[Console with AppConfig with ForecastPersistence with OpenWeatherClient, Throwable, Unit] = for {
     config  <- AppConfig.getConfig
     _       <- console.putStrLn(s"Host : ${config.host} | Port : ${config.port}")
     _       <- askFetchJudge.forever
   } yield ()
 
-  val appConfigLayer: NoDeps[Nothing, AppConfig] = AppConfig.live
-  val forecastPersistenceLayer: NoDeps[Nothing, ForecastPersistence] = KeyValuePersistence.inMemory[City, Forecast] >>> ForecastPersistence.live
-  val openWeatherClientLayer: NoDeps[Nothing, OpenWeatherClient] = Console.live ++ appConfigLayer >>> OpenWeatherClient.live
+  val forecastPersistenceLayer = KeyValuePersistence.inMemory[City, Forecast] >>> ForecastPersistence.live
+  val openWeatherClientLayer = Console.live ++ AppConfig.live >>> OpenWeatherClient.live
 
-  val program: ZIO[Console, Throwable, Unit] = logic.provideSomeLayer[Console](appConfigLayer ++ forecastPersistenceLayer ++ openWeatherClientLayer)
+  val program: ZIO[Console, Throwable, Unit] = logic.provideSomeLayer[Console](AppConfig.live ++ forecastPersistenceLayer ++ openWeatherClientLayer)
 }
