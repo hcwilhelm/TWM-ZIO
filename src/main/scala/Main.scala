@@ -47,13 +47,15 @@ object Main extends App {
     _       <- askFetchJudge.forever
   } yield ()
 
-  type PEnv = Persistence[City, Forecast] with Weather with configuration.Configuration
 
   object PEnv {
-    val live = Persistence.inMemory[City, Forecast] ++ configuration.Configuration.live >>> Weather.test
+    val l: ZLayer[Any, Nothing, Persistence[City, Forecast] with configuration.Configuration] =  Persistence.inMemory[City, Forecast] ++ configuration.Configuration.live
+    val w: ZLayer[Any, Nothing, Weather] = configuration.Configuration.live >>> Weather.test
   }
 
+
+
   val program: ZIO[Console, Throwable, Unit] = for {
-    logic      <- logic.provideSomeLayer[Console](PEnv.live)
+    logic      <- logic.provideSomeLayer[Console](PEnv.l ++ PEnv.w)
   } yield logic
 }
